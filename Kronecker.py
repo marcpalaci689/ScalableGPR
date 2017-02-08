@@ -5,6 +5,7 @@ import scipy.sparse as ss
 import time
 import solver
 from operator import mul
+import matplotlib.pyplot as plt
 
 def getMinMax(array):
     ''' 
@@ -22,11 +23,13 @@ def getMinMax(array):
 
 def CubicInterpolation(d1,d2,d3,d4):
     x1,x2,x3,x4 = 0,d1-d2,d1+d3,d1+d4
-    W1 = (d2*d3*d4)/(-x4*-x3*-x2)
-    W2 = (d1*d3*d4)/(x2*(x2-x3)*(x2-x4))
-    W3 = (d1*d2*d4)/(x3*(x3-x2)*(x3-x4))
-    W4 = (d1*d2*d3)/(x4*(x4-x2)*(x4-x3))
-    return W1,W2,W3,W4
+    W1 = (d2*-d3*-d4)/(-x4*-x3*-x2)
+    W2 = (d1*-d3*-d4)/(x2*(x2-x3)*(x2-x4))
+    W3 = (d1*d2*-d4)/(x3*(x3-x2)*(x3-x4))
+    W4 = (d1*d2*-d3)/(x4*(x4-x2)*(x4-x3))
+    if W1>1 or W2>1 or W3>1 or W4>1:
+        print(d1,d2,d3,d4)
+    return [W1,W2,W3,W4]
 
 def combinations(dimensions):
     '''
@@ -230,7 +233,7 @@ class tensor_grid:
                     # Calculate distance differences at 3 middle points
                     diff = n[d]-self.dims[d][mid]
                     last_diff = n[d]-self.dims[d][mid - 1]
-                    next_diff = n[d]-self.dims[d][mid - +1]
+                    next_diff = n[d]-self.dims[d][mid + 1]
                     
                     # Calculate dimensional factor
                     if d != self.D-1:
@@ -348,11 +351,11 @@ class tensor_grid:
                     # Calculate distance differences at 3 middle points
                     diff = n[d]-self.dims[d][mid]
                     last_diff = n[d]-self.dims[d][mid - 1]
-                    next_diff = n[d]-self.dims[d][mid - +1]
+                    next_diff = n[d]-self.dims[d][mid + 1]
                     
                     # Calculate dimensional factor
                     if d != self.D-1:
-                        dimensional_factor*=self.gridpoints[d+1]
+                        dimensional_factor*=self.gridpoints[d + 1]
                     
                     if last_diff*diff<0:
                         first_diff = n[d] - self.dims[d][mid - 2]  
@@ -459,22 +462,18 @@ class tensor_grid:
 
                 # Record distances         
                 d1,d2,d3,d4 = math.sqrt(d1),math.sqrt(d2),math.sqrt(d3),math.sqrt(d4)
-                          
+                                    
                 if d1==0 or d2 == 0 or d3==0 or d4==0: 
                     weight.append(1)
                     row_ind.append(index)
                     col_ind.append(i1)   
                 else:  
-                    weight.append((d1**-1)/(d1**-1+d2**-1))
-                    row_ind.append(index)
-                    col_ind.append(i1)  
-                    
-                    weight.append(1 - (d1**-1)/(d1**-1+d2**-1))
-                    row_ind.append(index)
-                    col_ind.append(i2) 
- 
-                index+=1
+                    weight += CubicInterpolation(d1,d2,d3,d4)
+                    row_ind += [index]*4
+                    col_ind += [i1,i2,i3,i4]
                 
+                index+=1
+            self.weight = weight     
             self.W = ss.csr_matrix((weight,(row_ind,col_ind)),shape=(self.N,self.M))
          
          
@@ -537,27 +536,39 @@ class tensor_grid:
                     col_ind.append(i2) 
  
                 index+=1
-                
+               
             self.W = ss.csr_matrix((weight,(row_ind,col_ind)),shape=(self.N,self.M))                                                      
 if __name__ == '__main__':
  
     parameters = { 's':0.0001,
                     'sigma' : 1,
-                    'l':10}
-    x = np.sort(np.random.normal(scale=5,size=(2,5000))).T
-    grid = tensor_grid(x,[1000,1000])   
+                    'l':25}
+    x = np.sort(np.random.normal(scale=25,size=(1,1000))).T
+    grid = tensor_grid(x,[1000])   
     grid.generate(parameters)
     start = time.time()
-    grid.SKI()
+    grid.SKI(interpolation='cubic')
     end = time.time()
     print('done in %2.16f seconds' %(end-start))   
     
-    '''
+   
     grid.y = np.random.normal(scale=2,size=(100,1))
-    grid.K = np.kron(grid.Kd[0],grid.Kd[1])
+    grid.K = grid.Kd[0]
     K_SKI = grid.W.dot((grid.W.dot(grid.K)).T).T     
-    K = Gaussian(x,x,1,10)
-    '''
+    K = Gaussian(x,x,1,25)
     
+    '''
+    plt.figure(1)
+    plt.contourf(K,100)
+    plt.colorbar()
+    
+    plt.figure(2)
+    plt.contourf(K_SKI,100)
+    plt.colorbar()
+    '''
+    plt.figure(3)
+    plt.contourf(np.abs(K-K_SKI),100)
+    plt.colorbar()
+   
     
     
