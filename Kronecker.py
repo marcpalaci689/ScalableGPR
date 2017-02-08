@@ -20,6 +20,13 @@ def getMinMax(array):
             min = i
     return min,max
 
+def CubicInterpolation(d1,d2,d3,d4):
+    x1,x2,x3,x4 = 0,d1-d2,d1+d3,d1+d4
+    W1 = (d2*d3*d4)/(-x4*-x3*-x2)
+    W2 = (d1*d3*d4)/(x2*(x2-x3)*(x2-x4))
+    W3 = (d1*d2*d4)/(x3*(x3-x2)*(x3-x4))
+    W4 = (d1*d2*d3)/(x4*(x4-x2)*(x4-x3))
+    return W1,W2,W3,W4
 
 def combinations(dimensions):
     '''
@@ -209,10 +216,8 @@ class tensor_grid:
             index = 0
             for n in self.x:
                 #initialize distances and indeces
-                d1=0
-                d2=0 
-                i1=0
-                i2=0
+                d1,d2 = 0,0
+                i1,i2 = 0,0
                 # index factor to account for which dimension we are in
                 dimensional_factor = 1
                      
@@ -252,8 +257,8 @@ class tensor_grid:
                         i2 += (mid-1)*dimensional_factor  
                         continue                
                     elif abs(next_diff) < 10**-10:
-                        i1 += (mid-1)*dimensional_factor  
-                        i2 += (mid-1)*dimensional_factor  
+                        i1 += (mid+1)*dimensional_factor  
+                        i2 += (mid+1)*dimensional_factor  
                         continue 
                                         
                     while last_diff*diff>0:
@@ -328,17 +333,16 @@ class tensor_grid:
             index = 0
             for n in self.x:
                 #initialize distances and indeces
-                d1=0
-                d2=0 
-                i1=0
-                i2=0
+                d1,d2,d3,d4 = 0,0,0,0
+                i1,i2,i3,i4 = 0,0,0,0
+                
                 # index factor to account for which dimension we are in
                 dimensional_factor = 1
                      
                 for d in reversed(xrange(self.D)):
                     # Initialize searching region. Note that since python rounds down we start at index 1.
-                    start = 1
-                    end = self.gridpoints[d]-1
+                    start = 2
+                    end = self.gridpoints[d]-2
                     mid = self.gridpoints[d]/2
                     
                     # Calculate distance differences at 3 middle points
@@ -351,28 +355,46 @@ class tensor_grid:
                         dimensional_factor*=self.gridpoints[d+1]
                     
                     if last_diff*diff<0:
-                        d1+=last_diff**2
-                        d2+=diff**2
-                        i1 += (mid-1)*dimensional_factor 
-                        i2 += mid*dimensional_factor 
+                        first_diff = n[d] - self.dims[d][mid - 2]  
+                        d1 += first_diff**2
+                        d2 += last_diff**2
+                        d3 += diff**2
+                        d4 += next_diff**2
+                        
+                        i1 += (mid-2)*dimensional_factor 
+                        i2 += (mid-1)*dimensional_factor 
+                        i3 += mid*dimensional_factor
+                        i4 += (mid+1)*dimensional_factor
                         continue
                     elif next_diff*diff<0:
-                        d1+=diff**2
-                        d2+=next_diff**2
-                        i1 += (mid)*dimensional_factor 
-                        i2 += (mid+1)*dimensional_factor 
+                        fourth_diff = n[d] - self.dims[d][mid +2]
+                        d1 += last_diff**2
+                        d2 += diff**2
+                        d3 += next_diff**2
+                        d4 += fourth_diff**2
+                        
+                        i1 += (mid-1)*dimensional_factor 
+                        i2 += mid*dimensional_factor 
+                        i3 += (mid+1)*dimensional_factor
+                        i4 += (mid+2)*dimensional_factor
                         continue                                        
                     elif abs(diff) < 10**-10:
                         i1 += mid*dimensional_factor  
-                        i2 += mid*dimensional_factor  
+                        i2 += mid*dimensional_factor
+                        i3 += mid*dimensional_factor  
+                        i4 += mid*dimensional_factor   
                         continue
                     elif abs(last_diff) < 10**-10:
                         i1 += (mid-1)*dimensional_factor  
-                        i2 += (mid-1)*dimensional_factor  
+                        i2 += (mid-1)*dimensional_factor
+                        i3 += (mid-1)*dimensional_factor  
+                        i4 += (mid-1)*dimensional_factor      
                         continue                
                     elif abs(next_diff) < 10**-10:
-                        i1 += (mid-1)*dimensional_factor  
-                        i2 += (mid-1)*dimensional_factor  
+                        i1 += (mid+1)*dimensional_factor  
+                        i2 += (mid+1)*dimensional_factor  
+                        i3 += (mid+1)*dimensional_factor  
+                        i4 += (mid+1)*dimensional_factor 
                         continue 
                                         
                     while last_diff*diff>0:
@@ -392,37 +414,53 @@ class tensor_grid:
                         
                         # Break if one of the following conditions are met
                         if last_diff*diff<0:
-                            d1+=last_diff**2
-                            d2+=diff**2
-                            i1 += (mid-1)*dimensional_factor 
-                            i2 += mid*dimensional_factor 
+                            first_diff = n[d] - self.dims[d][mid - 2]  
+                            d1 += first_diff**2
+                            d2 += last_diff**2
+                            d3 += diff**2
+                            d4 += next_diff**2
+                            
+                            i1 += (mid-2)*dimensional_factor 
+                            i2 += (mid-1)*dimensional_factor 
+                            i3 += mid*dimensional_factor
+                            i4 += (mid+1)*dimensional_factor
                             break
                         elif next_diff*diff<0:
-                            d1+=diff**2
-                            d2+=next_diff**2
-                            i1 += (mid)*dimensional_factor 
-                            i2 += (mid+1)*dimensional_factor 
+                            fourth_diff = n[d] - self.dims[d][mid +2]
+                            d1 += last_diff**2
+                            d2 += diff**2
+                            d3 += next_diff**2
+                            d4 += fourth_diff**2
+                            
+                            i1 += (mid-1)*dimensional_factor 
+                            i2 += mid*dimensional_factor 
+                            i3 += (mid+1)*dimensional_factor
+                            i4 += (mid+2)*dimensional_factor
                             break                        
                         elif abs(diff) < 10**-10:
                             i1 += mid*dimensional_factor  
-                            i2 += mid*dimensional_factor 
+                            i2 += mid*dimensional_factor
+                            i3 += mid*dimensional_factor  
+                            i4 += mid*dimensional_factor 
                             break
                         elif abs(last_diff) < 10**-10:
                             i1 += (mid-1)*dimensional_factor  
-                            i2 += (mid-1)*dimensional_factor                                                
+                            i2 += (mid-1)*dimensional_factor
+                            i3 += (mid-1)*dimensional_factor  
+                            i4 += (mid-1)*dimensional_factor                                                 
                             break
                         elif abs(next_diff) < 10**-10:
                             i1 += (mid+1)*dimensional_factor  
-                            i2 += (mid+1)*dimensional_factor                                                
+                            i2 += (mid+1)*dimensional_factor  
+                            i3 += (mid+1)*dimensional_factor  
+                            i4 += (mid+1)*dimensional_factor                                                
                             break
                      
 
                 # Record distances         
-                d1 = math.sqrt(d1)
-                d2 = math.sqrt(d2)           
-      
-          
-                if d1==0 or d2 == 0: 
+                d1,d2,d3,d4 = math.sqrt(d1),math.sqrt(d2),math.sqrt(d3),math.sqrt(d4)
+                          
+                if d1==0 or d2 == 0 or d3==0 or d4==0: 
                     weight.append(1)
                     row_ind.append(index)
                     col_ind.append(i1)   
