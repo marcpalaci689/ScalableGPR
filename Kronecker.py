@@ -163,8 +163,9 @@ class tensor_grid:
         dimensions = len(self.params['min'])
         self.dims = []
         for i in xrange(dimensions):
-            self.dims.append(np.linspace(self.params['min'][i],self.params['max'][i],num = self.params['points'][i]))
-        
+            delta = (self.params['max'][i] - self.params['min'][i])/(self.params['points'][i]-3)
+            self.dims.append(np.hstack((self.params['min'][i]-delta,np.linspace(self.params['min'][i] \
+            ,self.params['max'][i],num = self.params['points'][i]-2),self.params['max'][i]+delta)))
         # Get all points and calculate the Gram matrix
         #self.X = combinations(self.dims)
         #self.K = Gaussian(self.X,self.X,1,10)
@@ -318,6 +319,126 @@ class tensor_grid:
                 index+=1
                 
             self.W = ss.csr_matrix((weight,(row_ind,col_ind)),shape=(self.N,self.M))
+
+        if interpolation == 'cubic':
+            #self.W = np.zeros((self.N,len(self.X)))
+            row_ind = []
+            col_ind = [] 
+            weight  = []          
+            index = 0
+            for n in self.x:
+                #initialize distances and indeces
+                d1=0
+                d2=0 
+                i1=0
+                i2=0
+                # index factor to account for which dimension we are in
+                dimensional_factor = 1
+                     
+                for d in reversed(xrange(self.D)):
+                    # Initialize searching region. Note that since python rounds down we start at index 1.
+                    start = 1
+                    end = self.gridpoints[d]-1
+                    mid = self.gridpoints[d]/2
+                    
+                    # Calculate distance differences at 3 middle points
+                    diff = n[d]-self.dims[d][mid]
+                    last_diff = n[d]-self.dims[d][mid - 1]
+                    next_diff = n[d]-self.dims[d][mid - +1]
+                    
+                    # Calculate dimensional factor
+                    if d != self.D-1:
+                        dimensional_factor*=self.gridpoints[d+1]
+                    
+                    if last_diff*diff<0:
+                        d1+=last_diff**2
+                        d2+=diff**2
+                        i1 += (mid-1)*dimensional_factor 
+                        i2 += mid*dimensional_factor 
+                        continue
+                    elif next_diff*diff<0:
+                        d1+=diff**2
+                        d2+=next_diff**2
+                        i1 += (mid)*dimensional_factor 
+                        i2 += (mid+1)*dimensional_factor 
+                        continue                                        
+                    elif abs(diff) < 10**-10:
+                        i1 += mid*dimensional_factor  
+                        i2 += mid*dimensional_factor  
+                        continue
+                    elif abs(last_diff) < 10**-10:
+                        i1 += (mid-1)*dimensional_factor  
+                        i2 += (mid-1)*dimensional_factor  
+                        continue                
+                    elif abs(next_diff) < 10**-10:
+                        i1 += (mid-1)*dimensional_factor  
+                        i2 += (mid-1)*dimensional_factor  
+                        continue 
+                                        
+                    while last_diff*diff>0:
+                        
+                        # Update searching section
+                        if diff<0:
+                            end = mid
+                            mid = start + (mid-start)/2    
+                        else:
+                            start = mid
+                            mid = mid + (end-mid)/2
+                        
+                        # calculate new distance differences at middle points
+                        diff = n[d] - self.dims[d][mid]
+                        last_diff = n[d]-self.dims[d][mid - 1]
+                        next_diff = n[d]-self.dims[d][mid + 1]
+                        
+                        # Break if one of the following conditions are met
+                        if last_diff*diff<0:
+                            d1+=last_diff**2
+                            d2+=diff**2
+                            i1 += (mid-1)*dimensional_factor 
+                            i2 += mid*dimensional_factor 
+                            break
+                        elif next_diff*diff<0:
+                            d1+=diff**2
+                            d2+=next_diff**2
+                            i1 += (mid)*dimensional_factor 
+                            i2 += (mid+1)*dimensional_factor 
+                            break                        
+                        elif abs(diff) < 10**-10:
+                            i1 += mid*dimensional_factor  
+                            i2 += mid*dimensional_factor 
+                            break
+                        elif abs(last_diff) < 10**-10:
+                            i1 += (mid-1)*dimensional_factor  
+                            i2 += (mid-1)*dimensional_factor                                                
+                            break
+                        elif abs(next_diff) < 10**-10:
+                            i1 += (mid+1)*dimensional_factor  
+                            i2 += (mid+1)*dimensional_factor                                                
+                            break
+                     
+
+                # Record distances         
+                d1 = math.sqrt(d1)
+                d2 = math.sqrt(d2)           
+      
+          
+                if d1==0 or d2 == 0: 
+                    weight.append(1)
+                    row_ind.append(index)
+                    col_ind.append(i1)   
+                else:  
+                    weight.append((d1**-1)/(d1**-1+d2**-1))
+                    row_ind.append(index)
+                    col_ind.append(i1)  
+                    
+                    weight.append(1 - (d1**-1)/(d1**-1+d2**-1))
+                    row_ind.append(index)
+                    col_ind.append(i2) 
+ 
+                index+=1
+                
+            self.W = ss.csr_matrix((weight,(row_ind,col_ind)),shape=(self.N,self.M))
+         
          
         ### The following code bounds the training points by brute force rather than binary search    
         if interpolation == 'linearBruteForce':
@@ -391,27 +512,13 @@ if __name__ == '__main__':
     start = time.time()
     grid.SKI()
     end = time.time()
-    print('done in %.16f seconds' %(end-start))   
+    print('done in %2.16f seconds' %(end-start))   
     
     '''
     grid.y = np.random.normal(scale=2,size=(100,1))
     grid.K = np.kron(grid.Kd[0],grid.Kd[1])
     K_SKI = grid.W.dot((grid.W.dot(grid.K)).T).T     
     K = Gaussian(x,x,1,10)
-    '''
-    
-    grid1 = tensor_grid(x,[1000,1000])   
-    grid1.generate(parameters)
-    start = time.time()
-    grid1.SKI(interpolation='nonlinear')   
-    end = time.time()
-    print('done in %.16f seconds' %(end-start))
-    
-    '''
-    grid1.y = np.random.normal(scale=2,size=(100,1))
-    grid1.K = np.kron(grid1.Kd[0],grid1.Kd[1])
-    K_SKI_1 = grid1.W.dot((grid1.W.dot(grid1.K)).T).T     
-    K_1 = Gaussian(x,x,1,10)
     '''
     
     
