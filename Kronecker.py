@@ -22,15 +22,25 @@ def getMinMax(array):
     return min,max
 
 def CubicInterpolation(d1,d2,d3,d4):
+    ''' 
+    Given the distances to the bounding inducing points, get cubic interpolation weights
+        
+        Inputs:
+            d1 --> Distance to furthest lower bound
+            d2 --> Distance to closest lower bound
+            d3 --> Distance to closest upper bound
+            d4 --> Distance to furthest upper bound
+    
+        Outputs:
+            [W1,W2,W3,W4] --> List of weights
+    '''
     x1,x2,x3,x4 = 0,d1-d2,d1+d3,d1+d4
     W1 = (d2*-d3*-d4)/(-x4*-x3*-x2)
     W2 = (d1*-d3*-d4)/(x2*(x2-x3)*(x2-x4))
     W3 = (d1*d2*-d4)/(x3*(x3-x2)*(x3-x4))
     W4 = (d1*d2*-d3)/(x4*(x4-x2)*(x4-x3))
-    if W1>1 or W2>1 or W3>1 or W4>1:
-        print(d1,d2,d3,d4)
     return [W1,W2,W3,W4]
-
+    
 def combinations(dimensions):
     '''
     
@@ -476,75 +486,15 @@ class tensor_grid:
             self.weight = weight     
             self.W = ss.csr_matrix((weight,(row_ind,col_ind)),shape=(self.N,self.M))
          
-         
-        ### The following code bounds the training points by brute force rather than binary search    
-        if interpolation == 'linearBruteForce':
-            #self.W = np.zeros((self.N,len(self.X)))
-            row_ind = []
-            col_ind = [] 
-            weight  = []          
-            index = 0
-            for n in self.x:
-                #initialize distances and indeces
-                d1=0
-                d2=0 
-                i1=0
-                i2=0
-                # index factor to account for which dimension we are in
-                dimensional_factor = 1
-              
-                # Loop from last dimension to first (for convenience of finding the indeces)
-                for d in reversed(xrange(self.D)):
-                    diff = n[d]-self.dims[d][0]
-                    if d != self.D-1:
-                        dimensional_factor*=self.gridpoints[d+1]
-                    if diff == 0:
-                        i1 += 0*dimensional_factor  
-                        i2 += 0*dimensional_factor 
-                        continue
-                    last_diff = diff
-                    for p in xrange(1,self.gridpoints[d]):
-                        diff = n[d] - self.dims[d][p]
-                        if diff<-10**-8:
-                            d1+=last_diff**2
-                            d2+=diff**2
-                            i1 += (p-1)*dimensional_factor 
-                            i2 += p*dimensional_factor 
-                            break
-                        elif abs(diff) < 10**-8:
-                            i1 += p*dimensional_factor  
-                            i2 += p*dimensional_factor                     
-                            break
-                        last_diff = diff     
- 
-                # Record distances         
-                d1 = math.sqrt(d1)
-                d2 = math.sqrt(d2)           
-      
-          
-                if d1==0 or d2 == 0: 
-                    weight.append(1)
-                    row_ind.append(index)
-                    col_ind.append(i1)   
-                else:  
-                    weight.append((d1**-1)/(d1**-1+d2**-1))
-                    row_ind.append(index)
-                    col_ind.append(i1)  
-                    
-                    weight.append(1 - (d1**-1)/(d1**-1+d2**-1))
-                    row_ind.append(index)
-                    col_ind.append(i2) 
- 
-                index+=1
-               
-            self.W = ss.csr_matrix((weight,(row_ind,col_ind)),shape=(self.N,self.M))                                                      
+
+                                                   
 if __name__ == '__main__':
  
     parameters = { 's':0.0001,
                     'sigma' : 1,
                     'l':25}
     x = np.sort(np.random.normal(scale=25,size=(1,1000))).T
-    grid = tensor_grid(x,[1000])   
+    grid = tensor_grid(x,[40])   
     grid.generate(parameters)
     start = time.time()
     grid.SKI(interpolation='cubic')
@@ -566,7 +516,7 @@ if __name__ == '__main__':
     plt.contourf(K_SKI,100)
     plt.colorbar()
     '''
-    plt.figure(3)
+    plt.figure(1)
     plt.contourf(np.abs(K-K_SKI),100)
     plt.colorbar()
    
