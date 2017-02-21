@@ -1,5 +1,6 @@
 import numpy as np
 from kernels import Gaussian
+from kernels import NoNoise_Gaussian
 import math
 import scipy.sparse as ss
 import time
@@ -105,48 +106,6 @@ def MVM(W,K,y):
     '''
         
     return W.dot(np.dot(K,W.transpose().dot(y)))
-
-def kron_MVM(W,K,y):
-    ''' 
-    This function performs a Matrix-Matrix-Matrix-Vector multiplication
-    K_SKI*y = WKW'y
-    efficiently in O(N+m^2) time and memory
-    
-    Inputs:
-        W --> Interpolation weights matrix in compressed row format
-        K --> mxm grid kernel matrix
-        y --> Nx1 target value vector
-    
-    Outputs:
-        WKW'y --> for use in Conjugate Gradient method
-    '''
-        
-    return W.dot(MV_kronprod(K,W.transpose().dot(y)))    
-
-
-def MV_kronprod(krons,b):
-    '''
-    This function will perform a vector matrix product between a packed kronecker matrix
-    and a column vector
-    
-    Inputs:
-        krons --> list of tensor matrices
-        b     --> Column vector
-    
-    Outputs:
-        x  --> column vector resulting from product between the unpacked kronecker product and
-               vector b 
-    '''
-    x = b
-    N = len(b)
-    D = len(krons)
-    
-    for d in reversed(xrange(D)):
-        ld = len(krons[d])
-        X = x.reshape((ld,N/ld),order='f') 
-        Z = np.dot(krons[d],X).T
-        x = Z.reshape((-1,1),order='f')
-    return x
     
 
 class tensor_grid:
@@ -194,7 +153,7 @@ class tensor_grid:
         #self.Kd_inv = []
         for i in self.dims:
             i = i.reshape(-1,1)
-            self.Kd.append(Gaussian(i,i,(parameters['sigma'])**(1.0/self.D),parameters['l']))
+            self.Kd.append(NoNoise_Gaussian(i,i,parameters['sigma']*(1.0/self.D),parameters['l']))
             #self.Kd_inv.append(np.linalg.inv(self.Kd[-1]))
         
         #self.K = np.kron(self.Kd[1],self.Kd[2])
@@ -492,9 +451,9 @@ if __name__ == '__main__':
  
     parameters = { 's':0.0001,
                     'sigma' : 1,
-                    'l':25}
+                    'l':40}
     x = np.sort(np.random.normal(scale=25,size=(1,1000))).T
-    grid = tensor_grid(x,[40])   
+    grid = tensor_grid(x,[20])   
     grid.generate(parameters)
     start = time.time()
     grid.SKI(interpolation='cubic')
@@ -505,7 +464,7 @@ if __name__ == '__main__':
     grid.y = np.random.normal(scale=2,size=(100,1))
     grid.K = grid.Kd[0]
     K_SKI = grid.W.dot((grid.W.dot(grid.K)).T).T     
-    K = Gaussian(x,x,1,25)
+    K = Gaussian(x,x,1,40)
     
     '''
     plt.figure(1)
@@ -515,10 +474,12 @@ if __name__ == '__main__':
     plt.figure(2)
     plt.contourf(K_SKI,100)
     plt.colorbar()
-    '''
+    ''' 
     plt.figure(1)
+    plt.clf()
     plt.contourf(np.abs(K-K_SKI),100)
+    plt.gca().invert_yaxis()
     plt.colorbar()
-   
+    
     
     

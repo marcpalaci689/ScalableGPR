@@ -4,11 +4,14 @@ import math
 import time
 import solver 
 import gc
-import sklearn.datasets
 import sample
 import pyGPs
 import Kronecker as kron
 from kernels import Gaussian
+from kernels import NoNoise_Gaussian
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 
 class GPRegression:
 
@@ -16,7 +19,7 @@ class GPRegression:
 
 		### Load dataset
 		if parameters['dataset'] == 'Classic':
-			data   = np.load('2d_data.npz')
+			data   = np.load('regression_data.npz')
 			self.x = data['x']
 			self.y = data['y']
 			self.X = data['xstar']
@@ -41,20 +44,68 @@ class GPRegression:
 		self.params = np.array([[self.sigma],[self.l],[np.exp(self.s)]])
 
 	
-
-
-	def GP_Regression(self):
-	
-		self.params = np.array([[self.sigma],[self.l],[self.s]])
+	def optimizeHyperparameters(self):
 		
-		K_y   = Gaussian(self.x,self.x,self.sigma,self.l)+self.s*np.eye(self.N)
-		K_s   = Gaussian(self.x,self.X,self.sigma,self.l)
-		K_ss = Gaussian(self.X,self.X,self.sigma,self.l)
-
+		''' for testing purposes '''
+		K_y = Gaussian(self.x,self.x,self.sigma,self.l,self.s)
 		### Calculate posterior mean and covariance 
 		### NOTE: we are assuming mean is zero 
 		L            = np.linalg.cholesky(K_y)
 		self.alpha   = np.linalg.solve(L.T,np.linalg.solve(L,self.y))
+		self.marginal_likelihood = -0.5*np.dot(self.y.T,self.alpha) - \
+		0.5*np.log(np.linalg.det(K_y)) -0.5*self.N*np.log(2*math.pi)
+		
+		print(self.marginal_likelihood)
+		''' end of testing purpose '''
+		
+		iter = 1
+		params = np.array([[self.sigma],[self.l],[self.s]])
+		try:
+			opt = solver.NonLinear_CG(self.x,self.y,params,maxiter=100)
+			best = opt[0]
+			max = opt[1][0]
+		except:
+			opt = np.ones((3,1))
+			best = params
+			max = self.marginal_likelihood
+
+	
+		while opt[2] != 0 and iter<=3:	
+			params = np.random.normal(loc = 2,scale=2.5,size=(3,1))
+			try:
+				opt = solver.NonLinear_CG(self.x,self.y,params,maxiter=200)
+				if opt[1][0] > max or opt[2] == 0:
+					if opt[2] == 0:
+						print('solution found')
+					max = opt[1][0]
+					best = opt[0]
+					break
+			except:	
+				iter+=1
+		
+
+		self.sigma = best[0]
+		self.l     = best[1]
+		self.s     = best[2]	
+		self.parameters['sigma'] = self.sigma [0]
+		self.parameters['l'] = self.l[0]
+		self.parameters['s'] = self.s[0]
+		print(max)
+
+	def GP_Regression(self):
+	
+		
+		K_y = Gaussian(self.x,self.x,self.sigma,self.l,self.s)
+		K_s   = NoNoise_Gaussian(self.x,self.X,self.sigma,self.l)
+		K_ss = NoNoise_Gaussian(self.X,self.X,self.sigma,self.l)
+		self.K_s = K_s
+	
+		### Calculate posterior mean and covariance 
+		### NOTE: we are assuming mean is zero 
+		L            = np.linalg.cholesky(K_y)
+		self.alpha   = np.linalg.solve(L.T,np.linalg.solve(L,self.y))
+		
+	
 		self.mu_s    = np.dot(K_s.T,self.alpha)
 
 		v            = np.linalg.solve(L,K_s)
@@ -73,18 +124,18 @@ class GPRegression:
 	def KISS_GP(self):
 		
 		# Initialize grid
-		self.grid 	 = kron.tensor_grid(self.x,[5000,5000])
+		self.grid 	 = kron.tensor_grid(self.x,[50,50])
 		
 		# Generate grid
 		self.grid.generate(self.parameters)	
 		
 		#Perform Interpolation
-		self.grid.SKI()
+		self.grid.SKI(interpolation='cubic')
 		
-		self.alpha	 = solver.CG(self.grid.W,self.grid.Kd,self.y,sigma=self.s,tolerance=1e-7)
+		self.alpha	 = solver.Linear_CG(self.grid.W,self.grid.Kd,self.y,self.s,tolerance=1e-12)
 		
-		K_s   		 = Gaussian(self.x,self.X,self.sigma,self.l)
-		
+		K_s   		 = NoNoise_Gaussian(self.x,self.X,self.sigma,self.l)
+		self.K_s = K_s
 		self.mu_s    = np.dot(K_s.T,self.alpha[0])
 		
 	
@@ -113,43 +164,58 @@ class GPRegression:
 
 if __name__ == '__main__':
 	gc.collect()
-	parameters={ 'dataset':'Classic',
-				 'n':100,
-		         's':math.exp(-4),
-		         'sigma':math.exp(0.5),
-		         'l':math.exp(3),
-		         'kernel': 'SE'
+	
+	data = np.load('test_data.npz')
+	x1 = np.linspace(0,100,num=100).reshape(100,1)
+	x2 = np.linspace(0,100,num=100).reshape(100,1)
+	x1s = np.linspace(-10,110,num=200).reshape(200,1)
+	x2s = np.linspace(-10,110,num=200).reshape(200,1)
+	x = np.hstack((x1,x2))
+	xs=np.hstack((x1s,x2s))
+	y= 100*np.sin(x1+x2).reshape(100,1)
+	parameters={ 'dataset':'Modified',
+				 'n':200,
+		         's':1,
+		         'sigma':1,
+		         'l': 1,
+		         'kernel': 'SE',
+		         'x' : x,
+		         'y' : y,
+		         'X' : xs,
 		         }
+	
+	sample = GPRegression(parameters)
+	sample.optimizeHyperparameters()
+	sample.GP_Regression()
+	
+	sample1 = GPRegression(parameters)
+	#sample1.optimizeHyperparameters()
+	sample1.KISS_GP() 
+	Kski = np.kron(sample1.grid.Kd[0],sample1.grid.Kd[1])
+	Kski = sample1.grid.W.dot((sample1.grid.W.dot(Kski)).T).T + math.exp(-2*sample1.s)*np.eye(len(sample1.x))
+	Ky = Gaussian(sample1.x,sample1.x,sample1.sigma,sample1.l,sample1.s)
+	#sample.GP_Regression()
+	
+	fig = plt.figure()
+	ax = fig.add_subplot(111, projection='3d')
+	
+	ax.scatter(sample.x[:,0],sample.x[:,1],sample.y,c='b')
+	ax.scatter(sample.X[:,0],sample.X[:,1],sample.mu_s,c='r')
+	
+	
+	
 	'''
 	demoData = np.load('regression_data.npz')
 	x = demoData['x']
 	y = demoData['y']
 	z = demoData['xstar']
-	
-	
-	model = pyGPs.GPR()
-	model.getPosterior(x,y)
-	model.optimize(x,y)
-	model.predict(z)
-	model.plot()
 	'''
 	
-	sample = GPRegression(parameters)
-	sample.KISS_GP()
 	
-	sample1 = GPRegression(parameters)
-	sample1.GP_Regression()
-	'''
-	k = np.kron(sample.grid.Kd[0],sample.grid.Kd[1])
-	W = sample.grid.W.toarray()
 	
-	kski = np.dot(W,np.dot(k,W.T))
-	
-	Ky = Gaussian(sample1.x,sample1.x,parameters['sigma'],parameters['l'])
-	'''
-#sample.KISS_GP()
-#ax.fill_between(self.X.T, (self.mu_s-2*self.s_s).T, (self.mu_s+2*self.s_s).T,color='blue',interpolate=True)
 
-		
-		
+	
+	
+	
+
 
