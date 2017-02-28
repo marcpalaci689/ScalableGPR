@@ -145,15 +145,14 @@ class tensor_grid:
             delta = (self.params['max'][i] - self.params['min'][i])/(self.params['points'][i]-3)
             self.dims.append(np.hstack((self.params['min'][i]-delta,np.linspace(self.params['min'][i] \
             ,self.params['max'][i],num = self.params['points'][i]-2),self.params['max'][i]+delta)))
-        # Get all points and calculate the Gram matrix
-        #self.X = combinations(self.dims)
-        #self.K = Gaussian(self.X,self.X,1,10)
-        
+
+    
         self.Kd = []
         #self.Kd_inv = []
         for i in self.dims:
             i = i.reshape(-1,1)
             self.Kd.append(NoNoise_Gaussian(i,i,parameters['sigma']*(1.0/self.D),parameters['l']))
+            
             #self.Kd_inv.append(np.linalg.inv(self.Kd[-1]))
         
         #self.K = np.kron(self.Kd[1],self.Kd[2])

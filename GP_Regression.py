@@ -11,7 +11,8 @@ from kernels import Gaussian
 from kernels import NoNoise_Gaussian
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-
+import scipy.io
+import kernels 
 
 class GPRegression:
 
@@ -44,54 +45,84 @@ class GPRegression:
 		self.params = np.array([[self.sigma],[self.l],[np.exp(self.s)]])
 
 	
-	def optimizeHyperparameters(self):
+	def optimizeHyperparameters(self,kron=True):
 		
-		''' for testing purposes '''
-		K_y = Gaussian(self.x,self.x,self.sigma,self.l,self.s)
-		### Calculate posterior mean and covariance 
-		### NOTE: we are assuming mean is zero 
-		L            = np.linalg.cholesky(K_y)
-		self.alpha   = np.linalg.solve(L.T,np.linalg.solve(L,self.y))
-		self.marginal_likelihood = -0.5*np.dot(self.y.T,self.alpha) - \
-		0.5*np.log(np.linalg.det(K_y)) -0.5*self.N*np.log(2*math.pi)
+		if kron == False:
+			K_y = Gaussian(self.x,self.x,self.sigma,self.l,self.s)
+			### Calculate posterior mean and covariance 
+			### NOTE: we are assuming mean is zero 
+			L            = np.linalg.cholesky(K_y)
+			self.alpha   = np.linalg.solve(L.T,np.linalg.solve(L,self.y))
+			min = 0.5*np.dot(self.y.T,self.alpha) + \
+			0.5*np.log(np.linalg.det(K_y)) +0.5*self.N*np.log(2*math.pi)
+			if min==-np.inf: min=np.inf
+			print (min)
+			params = np.array([[self.sigma],[self.l],[self.s]])
+			best_params = params
 		
-		print(self.marginal_likelihood)
-		''' end of testing purpose '''
-		
-		iter = 1
-		params = np.array([[self.sigma],[self.l],[self.s]])
-		try:
-			opt = solver.NonLinear_CG(self.x,self.y,params,maxiter=100)
-			best = opt[0]
-			max = opt[1][0]
-		except:
-			opt = np.ones((3,1))
-			best = params
-			max = self.marginal_likelihood
-
-	
-		while opt[2] != 0 and iter<=3:	
-			params = np.random.normal(loc = 2,scale=2.5,size=(3,1))
-			try:
-				opt = solver.NonLinear_CG(self.x,self.y,params,maxiter=200)
-				if opt[1][0] > max or opt[2] == 0:
-					if opt[2] == 0:
-						print('solution found')
-					max = opt[1][0]
-					best = opt[0]
-					break
-			except:	
+			
+			params,ML,i = solver.minimize(params,self.x,self.y)
+			print(len(ML))
+			print(ML[-1])
+			if ML[-1] != -np.inf and ML[-1] < min:
+				min = ML[-1]
+				best_params = params		
+			
+			iter= 1
+			while iter<10:
+				params = 0.2*np.random.randint(-20,20,size=(3,1))
+				params,ML,i = solver.minimize(params,self.x,self.y)
+				print(len(ML))
+				print(ML[-1])
+				if ML[-1] != -np.inf and ML[-1] < min:
+					min = ML[-1]
+					best_params = params
 				iter+=1
+				
+			
+			self.s = best_params[2]
+			self.sigma = best_params[0]
+			self.l = best_params[1]
+			self.parameters['s'] = self.s
+			self.parameters['sigma'] = self.sigma
+			self.parameters['l'] = self.l
 		
-
-		self.sigma = best[0]
-		self.l     = best[1]
-		self.s     = best[2]	
-		self.parameters['sigma'] = self.sigma [0]
-		self.parameters['l'] = self.l[0]
-		self.parameters['s'] = self.s[0]
-		print(max)
-
+		if kron == True:
+			
+			params = np.array([[self.sigma],[self.l],[self.s]])
+			min = kernels.Gaussian_Kron(self.grid.W,self.grid.dims,self.y,params)
+			if min==-np.inf: min=np.inf
+			best_params = params
+			print(min)
+			
+			params,ML,i = solver.minimize_kron(params,self.grid.W,self.grid.dims,self.y)
+			print(ML[-1])
+			if ML[-1] != -np.inf and ML[-1] < min :
+				print(len(ML))
+				min = ML[-1]
+				best_params = params		
+			
+			iter= 1
+			while iter<10:
+				params = 0.2*np.random.randint(-20,20,size=(3,1))
+				params,ML,i = solver.minimize_kron(params,self.grid.W,self.grid.dims,self.y)
+				print(len(ML))
+				print(ML[-1])
+				if ML[-1] != -np.inf and ML[-1] < min:
+					min = ML[-1]
+					best_params = params
+					print(best_params)
+				iter+=1
+				
+			
+			self.s = best_params[2]
+			self.sigma = best_params[0]
+			self.l = best_params[1]
+			self.parameters['s'] = self.s
+			self.parameters['sigma'] = self.sigma
+			self.parameters['l'] = self.l				
+		
+		
 	def GP_Regression(self):
 	
 		
@@ -119,12 +150,10 @@ class GPRegression:
 		0.5*np.log(np.linalg.det(K_y)) +0.5*self.N*np.log(2*math.pi)
 		
 		return 
-
-
-	def KISS_GP(self):
-		
+	
+	def Inducing_Points(self):
 		# Initialize grid
-		self.grid 	 = kron.tensor_grid(self.x,[50,50])
+		self.grid 	 = kron.tensor_grid(self.x,[125,125])
 		
 		# Generate grid
 		self.grid.generate(self.parameters)	
@@ -132,13 +161,17 @@ class GPRegression:
 		#Perform Interpolation
 		self.grid.SKI(interpolation='cubic')
 		
+		return
+
+
+	def KISS_GP(self):
+		self.grid.generate(self.parameters)	
 		self.alpha	 = solver.Linear_CG(self.grid.W,self.grid.Kd,self.y,self.s,tolerance=1e-12)
 		
 		K_s   		 = NoNoise_Gaussian(self.x,self.X,self.sigma,self.l)
 		self.K_s = K_s
 		self.mu_s    = np.dot(K_s.T,self.alpha[0])
 		
-	
 		
 		return 
 
@@ -166,41 +199,56 @@ if __name__ == '__main__':
 	gc.collect()
 	
 	data = np.load('test_data.npz')
-	x1 = np.linspace(0,100,num=100).reshape(100,1)
-	x2 = np.linspace(0,100,num=100).reshape(100,1)
-	x1s = np.linspace(-10,110,num=200).reshape(200,1)
-	x2s = np.linspace(-10,110,num=200).reshape(200,1)
+	x1 = np.linspace(0,50,num=1000).reshape(1000,1)
+	x2 = np.linspace(0,50,num=1000).reshape(1000,1)
+	x1s = np.linspace(-1,51,num=500).reshape(500,1)
+	x2s = np.linspace(-1,51,num=500).reshape(500,1)
 	x = np.hstack((x1,x2))
 	xs=np.hstack((x1s,x2s))
-	y= 100*np.sin(x1+x2).reshape(100,1)
+	y= 10*np.sin(0.1*(x1+x2)).reshape(1000,1)
 	parameters={ 'dataset':'Modified',
-				 'n':200,
-		         's':1,
-		         'sigma':1,
-		         'l': 1,
+				 'n':1000,
+		         's': 1,
+		         'sigma': -1,
+		         'l': 1 ,
 		         'kernel': 'SE',
 		         'x' : x,
 		         'y' : y,
 		         'X' : xs,
 		         }
 	
+	'''
 	sample = GPRegression(parameters)
-	sample.optimizeHyperparameters()
+	#sample.optimizeHyperparameters(kron=False)
 	sample.GP_Regression()
+	'''
+	
 	
 	sample1 = GPRegression(parameters)
-	#sample1.optimizeHyperparameters()
+	sample1.Inducing_Points()
+	sample1.optimizeHyperparameters()
 	sample1.KISS_GP() 
-	Kski = np.kron(sample1.grid.Kd[0],sample1.grid.Kd[1])
-	Kski = sample1.grid.W.dot((sample1.grid.W.dot(Kski)).T).T + math.exp(-2*sample1.s)*np.eye(len(sample1.x))
-	Ky = Gaussian(sample1.x,sample1.x,sample1.sigma,sample1.l,sample1.s)
+	
+	
+	#K    = np.kron(sample1.grid.Kd[0],sample1.grid.Kd[1])
+	#Kski = sample1.grid.W.dot((sample1.grid.W.dot(K)).T).T + ((math.exp(-sample1.s))**2)*np.eye(N)
 	#sample.GP_Regression()
+
+	'''
+	hyp = np.array([[parameters['sigma']],[parameters['l']],[parameters['s']]])
+	
+	g,f,L = kernels.Derivative_Gaussian(x,y,hyp)
+	
+	g1,f1 = kernels.Derivative_Gaussian_Kron(sample1.grid.W,sample1.grid.dims,sample1.y,hyp,1e-8)
+	'''
+	
 	
 	fig = plt.figure()
+	plt.clf()
 	ax = fig.add_subplot(111, projection='3d')
 	
-	ax.scatter(sample.x[:,0],sample.x[:,1],sample.y,c='b')
-	ax.scatter(sample.X[:,0],sample.X[:,1],sample.mu_s,c='r')
+	ax.scatter(sample1.x[:,0],sample1.x[:,1],sample1.y,c='b')
+	ax.scatter(sample1.X[:,0],sample1.X[:,1],sample1.mu_s,c='r')
 	
 	
 	
