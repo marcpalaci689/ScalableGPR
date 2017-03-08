@@ -1,8 +1,6 @@
 import numpy as np
 import scipy.sparse as ss
-from kernels import Gaussian
-from kernels import Derivative_Gaussian
-from kernels import Derivative_Gaussian_Kron
+import kernels 
 import scipy.sparse.linalg as solv 
 import time
 import math
@@ -51,7 +49,7 @@ def kron_MVM(W,K,y,noise):
     return W.dot(MV_kronprod(K,W.transpose().dot(y))) + (noise**2)*y   
 
 
-def Linear_CG(W,K,y,noise,tolerance=1e-6,maxiter=50000):
+def Linear_CG(W,K,y,noise,tolerance=1e-8,maxiter=10000):
     ''' Conjugate Gradient method to solve for alpha:
     alpha = inverse(WkW')*y
     
@@ -100,99 +98,8 @@ def Linear_CG(W,K,y,noise,tolerance=1e-6,maxiter=50000):
     #get indicator flag
     ind = 0 if iter != maxiter else iter     
     return (alpha,ind)
-'''
-def NonLinear_CG(x,y,params,tolerance=1e-3,maxiter = 200):
-    N = len(x)
-    
-    # Calculate the gradient wrt to paramters
-    K_y,dsig,dl,ds   = Derivative_Gaussian(x,x,params[0],params[1],params[2])
-    inv_Ky = np.linalg.inv(K_y)
-    alpha = np.dot(inv_Ky,y)
-    d_sigma = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),dsig))
-    d_l = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),dl))
-    d_s = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),ds))
-    
-    r_last = np.array([[d_sigma],[d_l],[d_s]])
-    p = r_last
-    norm_r_last = np.linalg.norm(r_last)**2
-    
-    # Make a line search algorithm
-    params = Backtracking(x,y,0.25,params,p)
-    
-    
-    
-    K_y,dsig,dl,ds   = Derivative_Gaussian(x,x,params[0],params[1],params[2])    
-    inv_Ky = np.linalg.inv(K_y)
-    
-    alpha = np.dot(inv_Ky,y)
-    d_sigma = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),dsig))
-    d_l = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),dl))
-    d_s = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),ds))
-    
-    r = np.array([[d_sigma],[d_l],[d_s]])
-    norm_r = np.linalg.norm(r)**2 
-   
-   
-    iter = 1    
-    
-    while (iter <maxiter and norm_r**0.5>tolerance):
-        
-        r_last=r
-        B = norm_r/norm_r_last
-        p = r_last+B*p
-        norm_r_last = norm_r
-        
-        params = Backtracking(x,y,0.25,params,p)
-        
-        K_y,dsig,dl,ds   = Derivative_Gaussian(x,x,params[0],params[1],params[2])
-        inv_Ky = np.linalg.inv(K_y)
 
-        alpha = np.dot(inv_Ky,y)
-        d_sigma = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),dsig))
-        d_l = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),dl))
-        d_s = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_Ky),ds))
-        
-        r = np.array([[d_sigma],[d_l],[d_s]])
-        norm_r = np.linalg.norm(r)**2 
-        
-        iter+=1
-    #get indicator flag
-    ML =  -0.5*np.dot(y.T,inv_Ky).dot(y)-0.5*np.log(np.linalg.det(K_y))-0.5*N*np.log(2*math.pi)
- 
-    ind = 0 if iter != maxiter else iter     
-    return (params,ML,ind)
-    
-
-def Backtracking(x,y,rho,params,p):
-   
-    K_y = Gaussian(x,x,params[0],params[1],params[2])
-    inv_Ky = np.linalg.inv(K_y)
-    step = 1/np.linalg.norm(p)
-    ML_initial =  -0.5*np.dot(y.T,inv_Ky).dot(y)-0.5*np.log(np.linalg.det(K_y))
-        
- 
-    par = params + step*p
-    K_y = Gaussian(x,x,par[0],par[1],par[2])
-    inv_Ky = np.linalg.inv(K_y) 
-    ML =  -0.5*np.dot(y.T,inv_Ky).dot(y)-0.5*np.log(np.linalg.det(K_y))
-    
-    iter = 0 
-    
-    
-    while ML[0][0]<ML_initial[0][0] and iter<=15:
-        step *= rho
-        par = params + step*p
-        K_y = Gaussian(x,x,par[0],par[1],par[2])
-        inv_Ky = np.linalg.inv(K_y)
-        ML =  -0.5*np.dot(y.T,inv_Ky).dot(y)-0.5*np.log(np.linalg.det(K_y))
-        
-        iter+=1      
-    
-    return par   
- '''
-
-
-def minimize(X,x,y, maxnumlinesearch=50, maxnumfuneval=None, red=1.0, verbose=False):
+def minimize(X,x,y, maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verbose=False):
     INT = 0.1;# don't reevaluate within 0.1 of the limit of the current bracket
     EXT = 3.0;              # extrapolate maximum 3 times the current step-size
     MAX = 20;                     # max 20 function evaluations per line search
@@ -223,7 +130,7 @@ def minimize(X,x,y, maxnumlinesearch=50, maxnumfuneval=None, red=1.0, verbose=Fa
 
     i = 0                                         # zero the run length counter
     ls_failed = 0                          # no previous line search has failed                        
-    df0,f0  = Derivative_Gaussian(x,y,X)  
+    df0,f0  = kernels.Derivative_Gaussian(x,y,X)  
     fX = [f0]
     i = i + (length<0)                                         # count epochs?!
     s = -df0; d0 = -dot(s.T,s)[0,0]    # initial search direction (steepest) and slope
@@ -243,7 +150,7 @@ def minimize(X,x,y, maxnumlinesearch=50, maxnumfuneval=None, red=1.0, verbose=Fa
             while (not success) and (M > 0):
                 try:
                     M = M - 1; i = i + (length<0)              # count epochs?!
-                    df3,f3 = Derivative_Gaussian(x,y,X+x3*s)
+                    df3,f3 = kernels.Derivative_Gaussian(x,y,X+x3*s)
                     if isnan(f3) or isinf(f3) or any(isnan(df3)+isinf(df3)):
                         if verbose : print ("error")
                         X = X - x3*s
@@ -296,7 +203,7 @@ def minimize(X,x,y, maxnumlinesearch=50, maxnumfuneval=None, red=1.0, verbose=Fa
                 x3 = (x2+x4)/2      # if we had a numerical problem then bisect
             x3 = max(min(x3, x4-INT*(x4-x2)),x2+INT*(x4-x2))  
                                                        # don't accept too close
-            df3,f3 = Derivative_Gaussian(x,y,X+x3*s)
+            df3,f3 = kernels.Derivative_Gaussian(x,y,X+x3*s)
             if f3 < F0:
                 X0 = X+x3*s; F0 = f3; dF0 = df3              # keep best values
             M = M - 1; i = i + (length<0)                      # count epochs?!
@@ -323,7 +230,7 @@ def minimize(X,x,y, maxnumlinesearch=50, maxnumfuneval=None, red=1.0, verbose=Fa
     if verbose: print (" \n")
     return X, fX, i   
 
-def minimize_kron(X,W,x,y, maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verbose=False):
+def minimize_kron(X,W,x,y, maxnumlinesearch=100, maxnumfuneval=None, red=1.0, verbose=True):
     INT = 0.1;# don't reevaluate within 0.1 of the limit of the current bracket
     EXT = 3.0;              # extrapolate maximum 3 times the current step-size
     MAX = 20;                     # max 20 function evaluations per line search
@@ -354,7 +261,7 @@ def minimize_kron(X,W,x,y, maxnumlinesearch=20, maxnumfuneval=None, red=1.0, ver
 
     i = 0                                         # zero the run length counter
     ls_failed = 0                          # no previous line search has failed                        
-    df0,f0  = Derivative_Gaussian_Kron(W,x,y,X)  
+    df0,f0  = kernels.Derivative_Gaussian_Kron(W,x,y,X)  
     fX = [f0]
     i = i + (length<0)                                         # count epochs?!
     s = -df0; d0 = -dot(s.T,s)[0,0]    # initial search direction (steepest) and slope
@@ -374,7 +281,7 @@ def minimize_kron(X,W,x,y, maxnumlinesearch=20, maxnumfuneval=None, red=1.0, ver
             while (not success) and (M > 0):
                 try:
                     M = M - 1; i = i + (length<0)              # count epochs?!
-                    df3,f3 = Derivative_Gaussian_Kron(W,x,y,X+x3*s)
+                    df3,f3 = kernels.Derivative_Gaussian_Kron(W,x,y,1.0*(X+x3*s))
                     if isnan(f3) or isinf(f3) or any(isnan(df3)+isinf(df3)):
                         if verbose : print ("error")
                         X = X - x3*s
@@ -384,6 +291,7 @@ def minimize_kron(X,W,x,y, maxnumlinesearch=20, maxnumfuneval=None, red=1.0, ver
                     x3 = (x2+x3)/2                       # bisect and try again
             if f3 < F0:
                 X0 = X+x3*s; F0 = f3; dF0 = df3   # keep best values
+                print(X0)
             d3 = dot(df3.T,s)[0,0]  
                                    # new slope
             if d3 > SIG*d0 or f3 > f0+x3*RHO*d0 or M == 0:                                   # are we done extrapolating?
@@ -427,7 +335,7 @@ def minimize_kron(X,W,x,y, maxnumlinesearch=20, maxnumfuneval=None, red=1.0, ver
                 x3 = (x2+x4)/2      # if we had a numerical problem then bisect
             x3 = max(min(x3, x4-INT*(x4-x2)),x2+INT*(x4-x2))  
                                                        # don't accept too close
-            df3,f3 = Derivative_Gaussian_Kron(W,x,y,X+x3*s)
+            df3,f3 = kernels.Derivative_Gaussian_Kron(W,x,y,1.0*(X+x3*s))
             if f3 < F0:
                 X0 = X+x3*s; F0 = f3; dF0 = df3              # keep best values
             M = M - 1; i = i + (length<0)                      # count epochs?!
