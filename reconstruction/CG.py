@@ -8,7 +8,7 @@ from numpy import dot, isinf, isnan, any, sqrt, isreal, real, nan, inf
 
 
 
-def Linear_CG(W,K,y,noise,tolerance=1e-12,maxiter=10000):
+def Linear_CG(W,K,y,noise,rank_fix,tolerance=1e-3,maxiter=5000):
     
     ''' Conjugate Gradient method to solve for alpha:
     alpha = inverse(WkW')*y
@@ -33,7 +33,7 @@ def Linear_CG(W,K,y,noise,tolerance=1e-12,maxiter=10000):
     p = r_last
     norm_r_last = np.linalg.norm(r_last)**2
     
-    mvm = KU.kron_MVM(W,K,p,noise)
+    mvm = KU.kron_MVM(W,K,p,noise,rank_fix)
     a = norm_r_last/np.dot(p.T,mvm)
     alpha = alpha + a*p
     r = r_last-a*mvm
@@ -47,7 +47,7 @@ def Linear_CG(W,K,y,noise,tolerance=1e-12,maxiter=10000):
         p = r_last+B*p
         norm_r_last = norm_r
         
-        mvm = KU.kron_MVM(W,K,p,noise)
+        mvm = KU.kron_MVM(W,K,p,noise,rank_fix)
         a = norm_r_last/np.dot(p.T,mvm)
         alpha = alpha + a*p
         r = r_last-a*mvm  
@@ -91,7 +91,9 @@ def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verb
 
     i = 0                                         # zero the run length counter
     ls_failed = 0                          # no previous line search has failed                        
-    df0,f0  = kernel.Grad(model,X) 
+    df0,f0,rnk  = kernel.Grad(model,X) 
+    if rnk!=0:
+        kernel.rank_fix = rnk
     print(df0,f0)
     fX = [f0]
     i = i + (length<0)                                         # count epochs?!
@@ -112,7 +114,9 @@ def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verb
             while (not success) and (M > 0):
                 try:
                     M = M - 1; i = i + (length<0)              # count epochs?!
-                    df3,f3 = kernel.Grad(model,X+x3*s)
+                    df3,f3,rnk = kernel.Grad(model,X+x3*s)
+                    if rnk!=0:
+                        kernel.rank_fix = rnk
                     if isnan(f3) or isinf(f3) or any(isnan(df3)+isinf(df3)):
                         if verbose : print ("error")
                         X = X - x3*s
@@ -166,7 +170,9 @@ def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verb
                 x3 = (x2+x4)/2      # if we had a numerical problem then bisect
             x3 = max(min(x3, x4-INT*(x4-x2)),x2+INT*(x4-x2))  
                                                        # don't accept too close
-            df3,f3 = kernel.Grad(model,X+x3*s)
+            df3,f3,rnk = kernel.Grad(model,X+x3*s)
+            if rnk!=0:
+                kernel.rank_fix = rnk
             if f3 < F0:
                 X0 = X+x3*s; F0 = f3; dF0 = df3              # keep best values
             M = M - 1; i = i + (length<0)                      # count epochs?!

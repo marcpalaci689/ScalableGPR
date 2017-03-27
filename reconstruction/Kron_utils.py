@@ -1,4 +1,5 @@
 import numpy as np
+import math
 
 def MV_kronprod(krons,b):
     '''
@@ -25,7 +26,7 @@ def MV_kronprod(krons,b):
     return x
     
 
-def kron_MVM(W,K,y,noise):
+def kron_MVM(W,K,y,noise,rank_fix):
     ''' 
     This function performs a Matrix-Matrix-Matrix-Vector multiplication
     K_SKI*y = (WKW' + spherical_noise)*y
@@ -40,8 +41,8 @@ def kron_MVM(W,K,y,noise):
     Outputs:
         (WKW' + spherical_noise)*y --> for use in Conjugate Gradient method
     '''
-        
-    return W.dot(MV_kronprod(K,W.transpose().dot(y))) + (noise**2)*y  
+ 
+    return W.dot(MV_kronprod(K,W.transpose().dot(y))) + (noise**2)*y + rank_fix*y  
 
 
 def KSKI_Unpack(W,K,noise):
@@ -53,7 +54,7 @@ def KSKI_Unpack(W,K,noise):
     
     TO DO : Find another way to do this by significantly reducing runtime.
     '''
-    
+    noise = math.exp(-noise)  
     N,M = W.shape
     Wt = W.transpose()
     col = np.array([])
