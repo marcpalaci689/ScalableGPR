@@ -15,17 +15,18 @@ kissgp_time=[]
 
 target = []
 
-x = []
-y = []
-X = []
+trainx = []
+trainy = []
+testX = []
 
 #N = [1024,2500,4900]
-n = [100,225,400]
+n = [100,225,400,900]
 
 
 for N in n:
 
     # Generate a 2d synthetic dataset
+    m = int(N**0.5)    
     x1 = np.sort(25*np.random.rand(1,N)-25*np.random.rand(1,N)).reshape(N,1)
     x2 =  np.sort(25*np.random.rand(1,N)-25*np.random.rand(1,N)).reshape(N,1)
     x1s = np.linspace(-24,24,num=300).reshape(300,1)
@@ -36,14 +37,14 @@ for N in n:
     ys = x1s**2 - 10*x1s*(np.sin(x2s))**3 
     
     
-    hyp=np.array([[-1.0],[-3.0],[6.0]])
+    hyp=np.array([[-3.0],[-4.0],[6.0]])
     
     # Perform standard Guassian Process	
     GPR  = GP.GPRegression(x,y,noise=True)
     GPR.SetKernel('Gaussian')
     GPR.SetHyp(hyp)
     start = time.time()
-    GPR.OptimizeHyp(random_starts=2)
+    GPR.OptimizeHyp(maxnumlinesearch=20,random_starts=3)
     end = time.time()
     print('Standard GP done in %.8f seconds' %(end-start))
     gp_opttime = end-start
@@ -53,12 +54,12 @@ for N in n:
     
     # Perform a Structured Kernel Interpolation regression 	
     KISSGP = GP.GPRegression(x,y,noise=True)
-    KISSGP.GenerateGrid([50,50])
+    KISSGP.GenerateGrid([m,m])
     KISSGP.Interpolate(scheme='cubic')
     KISSGP.SetKernel('Gaussian')
     KISSGP.SetHyp(hyp)
     start = time.time()
-    KISSGP.OptimizeHyp(maxnumlinesearch=20,random_starts=2)
+    KISSGP.OptimizeHyp(maxnumlinesearch=20,random_starts=3)
     end = time.time()
     print('Kiss-GP done in %.8f seconds' %(end-start))
     ski_opttime = end-start
@@ -76,9 +77,9 @@ for N in n:
     
     target.append(ys)
     
-    x.append(x)
-    y.append(y)
-    X.append(X)
+    trainx.append(x)
+    trainy.append(y)
+    testX.append(xs)
 '''
 
 # Plot training points and predictive curve on 3d plot for GP
@@ -135,11 +136,12 @@ kissgp_time = np.array(kissgp_time)
 
 target = np.array(target)
 
-x = np.array(x)
-y = np.array(y)  
-X = np.array(X)
+trainx = np.array(trainx)
+trainyy = np.array(trainy)  
+testX = np.array(testX)
 n = np.array(n)
+
 with open('gp.npz','wb') as f1:
-	np.savez(f1,x=x,y=y,X=X,target=target,mu=gp_mu,hyp=gp_hyp,time=gp_time,N=n)
+	np.savez(f1,x=trainx,y=trainy,X=testX,target=target,mu=gp_mu,hyp=gp_hyp,time=gp_time,N=n)
 with open('kissgp.npz','wb') as f2:
-	np.savez(f2,x=x,y=y,X=X,target=target,mu=kissgp_mu,hyp=kissgp_hyp,time=kissgp_time,N=n)
+	np.savez(f2,x=trainx,y=trainy,X=testX,target=target,mu=kissgp_mu,hyp=kissgp_hyp,time=kissgp_time,N=n)
