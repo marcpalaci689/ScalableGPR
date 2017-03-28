@@ -21,6 +21,9 @@ def D_Gaussian(x,y,hyp,rank_fix,n=False):
     N=len(x)
     sigma = math.exp(-hyp[0])
     l = math.exp(-hyp[1]) 
+    flag = False    
+    
+    rank_fix = (sigma**2)/1e6
     
     K =  (sigma**2)*np.exp(-(np.sum(x**2,1).reshape(-1,1)+np.sum(x**2,1)\
                              -2*np.dot(x,x.T))/(2.0*l**2))
@@ -29,29 +32,27 @@ def D_Gaussian(x,y,hyp,rank_fix,n=False):
                                             +np.sum(x**2,1)-2*np.dot(x,x.T)))    
     
     if n:
-        '''
         s = math.exp(-hyp[2])
         dK_ds     = -(2*s**2)*np.eye(N)
-        if s<1e-7:
-            K = K + 1e-7*np.eye(N)
-        else:
-            K = K + (s**2)*np.eye(N)
-        success = 0
-        try:
-             L = np.linalg.cholesky(K)
-        except: 
-            iter = -6    
-            while not success:
-                try:    
-                    L = np.linalg.cholesky(K + (10**iter)*(np.eye(N))) 
-                    success = True                          
-                except:
-                    iter+=1
-        '''
-        s = math.exp(-hyp[2])
-        dK_ds     = -(2*s**2)*np.eye(N)
-        L = np.linalg.cholesky(K+rank_fix*np.eye(N))
-            
+        
+        # Loop to perform Cholesky factorisation since Gramm matrix might not be SPD 
+        for i in xrange(5):
+            try:
+                L = np.linalg.cholesky(K+rank_fix*np.eye(N))
+                break
+            except:
+                # Gramm matrix not SPD, increase the rank correction term and reiterate
+                flag = True
+                #rank_fix = (10**i)*(sigma**2)/1000
+                rank_fix = 10*rank_fix
+                print('not SPD, reassigning rank corrector')
+            # If fixing the rank 4 times still did not work, raise an error.
+            if i==4:
+                raise ValueError('Gramm matrix not Positive Definite')
+        
+        if not flag:
+            rank_fix=0
+          
         inv_K = np.dot(np.linalg.inv(L).T,np.linalg.inv(L))
         alpha = np.linalg.solve(L.T,np.linalg.solve(L,y))
         d_sigma = 0.5*np.trace(np.dot((np.dot(alpha,alpha.T)-inv_K),dK_dsigma))
@@ -76,13 +77,18 @@ def D_Gaussian(x,y,hyp,rank_fix,n=False):
         return grad, func, rank_fix  
 
 def Gaussian_Kron(W,x,y,hyp,rank_fix):
+    # Initialize variables    
     N,M = W.shape
     D = len(x)
     sigma = math.exp(-hyp[0]/D)
     l = math.exp(-hyp[1]) 
     s = math.exp(-hyp[2])
+    rank_fix = (sigma**(2*D))/1e6
     
+    # set a flag to know if the CG converged
     flag=False
+    
+    # iterate 5 times or until CG converged to desired accuracy
     for i in xrange(5):
         # initialize list for dimensional gram matrices, Eigenvalues, and Eigenvectors
         K = []
@@ -109,15 +115,20 @@ def Gaussian_Kron(W,x,y,hyp,rank_fix):
     
         # Calculate alpha by Linear CG method
         alpha = CG.Linear_CG(W,K,y,s,rank_fix,tolerance=1e-3,maxiter=1000)
+        
+        # If the CG does not converge, increase the rank fixing term to give better conditioning
         if alpha[1] != 0:
             print('cg failed, reassigning rank correction term.')
-            rank_fix = (10**i)*(sigma**2)/10
+            #rank_fix = (10**i)*(sigma**2)/100
+            rank_fix = 10*rank_fix
         else:
             flag = True
-        
+            
+        # if CG succeeded, return alpha. Else reiterate with a larger rank_fix term.
         if flag:
             break
     alpha = alpha[0]
+    
     # Get negative log likelihood (objective function to be minimized)
     return 0.5*(np.dot(y.T,alpha)[0][0] + complexity + N*np.log(2*math.pi)),rank_fix    
 
@@ -128,13 +139,15 @@ def D_Gaussian_Kron(W,x,y,hyp,rank_fix,epsilon=1e-2,finitedifferencing = 'forwar
     # Get negative log likelihood (objective function to be minimized)
     func,r = Gaussian_Kron(W,x,y,hyp,rank_fix)
     
+    '''
     if r!=rank_fix:
         rank_fix = r
         rnk = r
     
     else:
         rnk=0
-        
+    '''
+    rnk=r    
     
     # Get gradients using centered difference operator
     grad = np.zeros((P,1))
@@ -169,22 +182,23 @@ class Gaussian:
         
         self.noise = model.noise
         self.D = model.x.shape[1]
-                   
+        
+        # intialize hyperparameters with relatively smooth values           
         if hyp=='auto':
             #self.hyp = (np.ones((D+2),1) if self.noise else np.ones((D+1),1))
             self.hyp = np.array([[-1.0],[-3.0],[6.0]])
         else:
             self.hyp = hyp
         
+        # if an interpolation matrix W is present, set attribute interpolate to true and set finite differencing epsilon.
         if hasattr(model,'W'):
             self.interpolate = True
             self.epsilon = 1e-2  #for finite differencing
-            self.rank_fix = (math.exp(-self.hyp[0])**2)/10
+            self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6 # Rank fix term to ensure well conditioned KSKI matrix
         else:
             self.interpolate = False
-            self.rank_fix = (math.exp(-self.hyp[0])**2)/10
-        self.x = model.x
-        self.y = model.y 
+            self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6 # Rank fix term to ensure well conditioned Gramm matrix
+        
                   
             
     def K(self,x):
@@ -215,21 +229,27 @@ class Gaussian:
   
                    
     def Optimize(self,model,maxnumlinesearch=50,random_starts = 2,verbose=False):
+        
+        # intialize optimum parameters        
         opthyp,optML,i = CG.minimize(self,model,maxnumlinesearch=maxnumlinesearch, maxnumfuneval=None, red=1.0, verbose=verbose) 
         optrankfix = self.rank_fix
+        
+        # Discourage very small characteristic lengths        
         if opthyp[1]>1.5:
             optML[-1] = np.inf 
         
+        # Rerun optimization with random intializations
         for i in xrange(random_starts):
             self.hyp = 0.1*np.random.randint(-40,0,size=(len(opthyp)-1,1))
-            self.hyp = np.vstack((self.hyp,np.random.randint(1,6)))
+            self.hyp = np.vstack((self.hyp,np.random.randint(3,7)))
             if self.interpolate:
-                self.rank_fix = (math.exp(-self.hyp[0])**2)/10
+                self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6
             else:
-                self.rank_fix = (math.exp(-self.hyp[0])**2)/10
+                self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6
             print(self.hyp)
-            
             hyp, ML, i = CG.minimize(self,model,maxnumlinesearch=maxnumlinesearch, maxnumfuneval=None, red=1.0, verbose=verbose) 
+
+            # if new optimum is better than the last, save it.            
             if ML[-1] != -np.inf and ML[-1] <optML[-1] and hyp[1]<1.5:
                 optML = ML
                 opthyp = hyp
@@ -238,6 +258,8 @@ class Gaussian:
         print(opthyp)
         print('Marginal Likelihood: ')
         print(optML[-1])
+        
+        # Save global optimum to the Kernel object
         self.hyp = opthyp
         self.rank_fix = optrankfix 
            

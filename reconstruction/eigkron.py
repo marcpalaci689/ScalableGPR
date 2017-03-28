@@ -20,7 +20,7 @@ trainy = []
 testX = []
 
 #N = [1024,2500,4900]
-n = [100,225,400,900]
+n = [625,1024,2500,4900,6400]
 
 
 for N in n:
@@ -44,7 +44,7 @@ for N in n:
     GPR.SetKernel('Gaussian')
     GPR.SetHyp(hyp)
     start = time.time()
-    GPR.OptimizeHyp(maxnumlinesearch=20,random_starts=3)
+    GPR.OptimizeHyp(maxnumlinesearch=20,random_starts=4)
     end = time.time()
     print('Standard GP done in %.8f seconds' %(end-start))
     gp_opttime = end-start
@@ -59,7 +59,7 @@ for N in n:
     KISSGP.SetKernel('Gaussian')
     KISSGP.SetHyp(hyp)
     start = time.time()
-    KISSGP.OptimizeHyp(maxnumlinesearch=20,random_starts=3)
+    KISSGP.OptimizeHyp(maxnumlinesearch=20,random_starts=4)
     end = time.time()
     print('Kiss-GP done in %.8f seconds' %(end-start))
     ski_opttime = end-start
