@@ -31,9 +31,9 @@ class GPRegression:
         self.kernel.hyp = hyp
         if self.kernel.__class__.__name__ == 'Gaussian':
             if self.kernel.interpolate:
-                self.kernel.rank_fix = (math.exp(-hyp[0])**2)/1e6
+                self.kernel.rank_fix = (math.exp(-hyp[0])**2)/1e5
             else:
-                self.kernel.rank_fix = (math.exp(-hyp[0])**2)/1e6
+                self.kernel.rank_fix = (math.exp(-hyp[0])**2)/1e5
     def OptimizeHyp(self,maxnumlinesearch=50,random_starts=2,verbose=True):    
         self.kernel.Optimize(self,maxnumlinesearch=maxnumlinesearch,random_starts=random_starts,verbose=verbose)
         return
@@ -122,7 +122,7 @@ if __name__ == '__main__':
     
     gc.collect()
     
-    N = 200    
+    N = 2500
     '''
     x1 = np.sort(np.random.normal(scale=10,size=(1,N))).reshape(N,1)
     x2 = np.sort(np.random.normal(scale=10,size=(1,N))).reshape(N,1)
@@ -134,13 +134,14 @@ if __name__ == '__main__':
     x = np.hstack((x1,x2))
     xs=np.hstack((x1s,x2s))
     y= x1**2 - 10*x1*(np.sin(x2))**3 + np.random.normal(scale=10,size=(N,1))
-    hyp = np.array([[-9.1],[-3.0],[5.0]])
+    hyp = np.array([[-4.0],[-1.0],[2.0]])
 
+    '''
     Model  = GPRegression(x,y,noise=True)
     Model.SetKernel('Gaussian')
     Model.SetHyp(hyp)
     start = time.time()
-    Model.OptimizeHyp(random_starts=3)
+    Model.OptimizeHyp(maxnumlinesearch=25,random_starts=8)
     end = time.time()
     Model.GPR()
     Model.Predict(xs)
@@ -153,14 +154,16 @@ if __name__ == '__main__':
     
     
     print('Standard GP done in %.8f seconds' %(end-start))
+    '''    
+    
     
     Model1 = GPRegression(x,y,noise=True)
-    Model1.GenerateGrid([20,20])
+    Model1.GenerateGrid([50,50])
     Model1.Interpolate(scheme='cubic')
     Model1.SetKernel('Gaussian')
     Model1.SetHyp(hyp)
     start = time.time()
-    Model1.OptimizeHyp(maxnumlinesearch=20,random_starts=1)
+    Model1.OptimizeHyp(maxnumlinesearch=40,random_starts=4)
     end = time.time()
     Model1.KISSGP()
     Model1.Predict(xs)

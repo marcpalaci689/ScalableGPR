@@ -4,6 +4,7 @@ import math
 import CG
 from scipy import optimize
 import copy
+import Kron_utils as KU
 
 warnings.filterwarnings("ignore",category=DeprecationWarning)
 
@@ -23,7 +24,7 @@ def D_Gaussian(x,y,hyp,rank_fix,n=False):
     l = math.exp(-hyp[1]) 
     flag = False    
     
-    rank_fix = (sigma**2)/1e6
+    rank_fix = (sigma**2)/1e5
     
     K =  (sigma**2)*np.exp(-(np.sum(x**2,1).reshape(-1,1)+np.sum(x**2,1)\
                              -2*np.dot(x,x.T))/(2.0*l**2))
@@ -50,8 +51,8 @@ def D_Gaussian(x,y,hyp,rank_fix,n=False):
             if i==4:
                 raise ValueError('Gramm matrix not Positive Definite')
         
-        if not flag:
-            rank_fix=0
+        #if not flag:
+            #rank_fix=0
           
         inv_K = np.dot(np.linalg.inv(L).T,np.linalg.inv(L))
         alpha = np.linalg.solve(L.T,np.linalg.solve(L,y))
@@ -83,8 +84,7 @@ def Gaussian_Kron(W,x,y,hyp,rank_fix):
     sigma = math.exp(-hyp[0]/D)
     l = math.exp(-hyp[1]) 
     s = math.exp(-hyp[2])
-    rank_fix = (sigma**(2*D))/1e6
-    
+
     # set a flag to know if the CG converged
     flag=False
     
@@ -101,26 +101,29 @@ def Gaussian_Kron(W,x,y,hyp,rank_fix):
             E.append(np.real(np.linalg.eig(K[-1])[0]))
         
         # Calculate eigenvalues of the inducing points
+        '''
         L = E[0]
         for d in xrange(1,D):
             L = np.kron(L,E[d])
         
         L = np.sort(L,kind='mergesort')
+        '''
+        L,ind = KU.largest_eigs(E,N,M)
         
         # Approximate to eigenvalues of KSKI by a factor M/N    
-        L = (float(N)/M)*L.reshape(-1,1)
+        L = (float(N)/M)*L
         
         # Calculate approximate log|KSKI| from L and s    
-        complexity = sum(np.log(L[(M-N):]+(s**2 + rank_fix)*np.ones((N,1))))
+        complexity = np.sum(np.log(L + (s**2 + rank_fix)*np.ones((N,1))))
     
         # Calculate alpha by Linear CG method
-        alpha = CG.Linear_CG(W,K,y,s,rank_fix,tolerance=1e-3,maxiter=1000)
+        alpha = CG.Linear_CG(W,K,y,s,rank_fix,tolerance=1e-3,maxiter=2000)
         
         # If the CG does not converge, increase the rank fixing term to give better conditioning
         if alpha[1] != 0:
             print('cg failed, reassigning rank correction term.')
             #rank_fix = (10**i)*(sigma**2)/100
-            rank_fix = 10*rank_fix
+            rank_fix = 100*rank_fix
         else:
             flag = True
             
@@ -135,19 +138,10 @@ def Gaussian_Kron(W,x,y,hyp,rank_fix):
 def D_Gaussian_Kron(W,x,y,hyp,rank_fix,epsilon=1e-2,finitedifferencing = 'forward'):
     
     P = len(hyp)
-    
+    rank_fix = (math.exp(-hyp[0])**2)/1e5 
     # Get negative log likelihood (objective function to be minimized)
-    func,r = Gaussian_Kron(W,x,y,hyp,rank_fix)
-    
-    '''
-    if r!=rank_fix:
-        rank_fix = r
-        rnk = r
-    
-    else:
-        rnk=0
-    '''
-    rnk=r    
+    func,rank_fix = Gaussian_Kron(W,x,y,hyp,rank_fix)
+      
     
     # Get gradients using centered difference operator
     grad = np.zeros((P,1))
@@ -158,8 +152,8 @@ def D_Gaussian_Kron(W,x,y,hyp,rank_fix,epsilon=1e-2,finitedifferencing = 'forwar
             # Iniialize a perturbation vector 
             eps = np.zeros((P,1))
             eps[p]  = epsilon
-            f_plus,r  = Gaussian_Kron(W,x,y,hyp+eps,rank_fix)
-            f_minus,r = Gaussian_Kron(W,x,y,hyp-eps,rank_fix)
+            f_plus,rank_fix  = Gaussian_Kron(W,x,y,hyp+eps,rank_fix)
+            f_minus,rank_fix = Gaussian_Kron(W,x,y,hyp-eps,rank_fix)
             # record the centered difference operator into the gradient vector
             grad[p] = (f_plus - f_minus)/(2*epsilon)   
     else:
@@ -168,13 +162,108 @@ def D_Gaussian_Kron(W,x,y,hyp,rank_fix,epsilon=1e-2,finitedifferencing = 'forwar
             # Iniialize a perturbation vector 
             eps = np.zeros((P,1))
             eps[p]  = epsilon
-            f_plus,r  = Gaussian_Kron(W,x,y,hyp+eps,rank_fix)
+            f_plus,rank_fix  = Gaussian_Kron(W,x,y,hyp+eps,rank_fix)
             # record the centered difference operator into the gradient vector
             grad[p] = (f_plus - func)/(epsilon)           
     print(func)
-    return grad, func, rnk
-            
+    return grad, func, rank_fix
 
+
+def exact_Gaussian_grad(W,x,y,hyp,rank_fix):
+
+        
+    # Initialize variables    
+    N,M = W.shape
+    D = len(x)
+    sigma = math.exp(-hyp[0]/D)
+    l = math.exp(-hyp[1]) 
+    s = math.exp(-hyp[2])
+
+    # set a flag to know if the CG converged
+    flag=False
+    
+    # iterate 5 times or until CG converged to desired accuracy
+    for i in xrange(5):
+        # initialize list for dimensional gram matrices, Eigenvalues, Eigenvectors, and gradients
+        K  = []
+        E  = []
+        Q  = []
+        dK = []
+        
+        # Calculate and stack K, Q, and E in each dimension.
+        for d in xrange(D):
+            xd = x[d].reshape(-1,1)
+            K.append((sigma**2.0)*np.exp(-(np.sum(xd**2.0,1).reshape(-1,1)+np.sum(xd**2.0,1)-2*np.dot(xd,xd.T))/(2.0*l**2)))  
+            e,q = np.linalg.eigh(K[-1])
+            E.append(e)
+            Q.append(q)
+        
+        # get N largest eigenvalues
+        L,ind = KU.largest_eigs(E,N,M)
+        
+              
+        
+        # Approximate to eigenvalues of KSKI by a factor M/N    
+        L = (float(N)/M)*L
+        
+        # Calculate approximate log|KSKI| from L and s    
+        complexity = np.sum(np.log(L + (s**2 + rank_fix)*np.ones((N,1))))
+    
+        # Calculate alpha by Linear CG method
+        alpha = CG.Linear_CG(W,K,y,s,rank_fix,tolerance=1e-3,maxiter=2000)
+        
+        # If the CG does not converge, increase the rank fixing term to give better conditioning
+        if alpha[1] != 0:
+            print('cg failed, reassigning rank correction term.')
+            #rank_fix = (10**i)*(sigma**2)/100
+            rank_fix = 10*rank_fix
+        else:
+            flag = True
+            
+        # if CG succeeded, return alpha. Else reiterate with a larger rank_fix term.
+        if flag:
+            break
+    alpha = alpha[0]
+    
+    # calculate gradients of Kuu and then the gradient of the likelihood
+    grad = np.zeros((P,1))
+
+    for p in xrange(len(hyp)):      
+        if p==0:
+            for d in xrange(D):
+                dK.append((-2/D)*K[d])
+            grad = -np.dot(alpha.T,KU.kron_MVM(W,dK,alpha,0,0))
+            # have to figure out which eigenvectors to use                
+            for i in xrange(N):
+                j   = ind[i]
+                eig = L[i]
+                qj = KU.eigenvector(Q,j)
+                grad += np.dot(qj.T,KU.MVM_kronprod(dK,qj))/(eig+s**2 + rank_fix)
+            grad[p]= grad
+        elif p==1:
+            for d in xrange(D):
+                dk.append(-(1.0/l**2)*np.multiply(K[d],(np.sum(x[d]**2,1).reshape(-1,1)\
+                                            +np.sum(x[d]**2,1)-2*np.dot(x[d],x[d].T)))
+            grad = -np.dot(alpha.T,KU.kron_MVM(W,dK,alpha,0,0))
+            for i in xrange(N):
+                j   = ind[i]
+                eig = L[i]
+                qj = KU.eigenvector(Q,j)
+                grad += np.dot(qj.T,KU.MVM_kronprod(dK,qj))/(eig + s**2 + rank_fix)
+            grad[p]= grad   
+        else:
+            dK = -(2*s**2)*np.eye(N)                             
+            grad = -np.dot(alpha.T,np.dot(dK,alpha))
+            for i in xrange(N):
+                eig = L[i]
+                grad += (-2*s**2)/(eig + s**2 + rank_fix)
+            grad[p]= grad                           
+
+            
+    func = 0.5*(np.dot(y.T,alpha)[0][0] + complexity + N*np.log(2*math.pi)),rank_fix
+    # Get negative log likelihood (objective function to be minimized)
+    return grad,func,rank_fix              
+'''
         
 class Gaussian:
     
@@ -194,10 +283,10 @@ class Gaussian:
         if hasattr(model,'W'):
             self.interpolate = True
             self.epsilon = 1e-2  #for finite differencing
-            self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6 # Rank fix term to ensure well conditioned KSKI matrix
+            self.rank_fix = (math.exp(-self.hyp[0])**2)/1e5 # Rank fix term to ensure well conditioned KSKI matrix
         else:
             self.interpolate = False
-            self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6 # Rank fix term to ensure well conditioned Gramm matrix
+            self.rank_fix = (math.exp(-self.hyp[0])**2)/1e2 # Rank fix term to ensure well conditioned Gramm matrix
         
                   
             
@@ -240,12 +329,12 @@ class Gaussian:
         
         # Rerun optimization with random intializations
         for i in xrange(random_starts):
-            self.hyp = 0.1*np.random.randint(-40,0,size=(len(opthyp)-1,1))
-            self.hyp = np.vstack((self.hyp,np.random.randint(3,7)))
+            self.hyp = 0.1*np.random.randint(-50,10,size=(len(opthyp)-1,1))
+            self.hyp = np.vstack((self.hyp,np.random.randint(-2,6)))
             if self.interpolate:
-                self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6
+                self.rank_fix = (math.exp(-self.hyp[0])**2)/1e5
             else:
-                self.rank_fix = (math.exp(-self.hyp[0])**2)/1e6
+                self.rank_fix = (math.exp(-self.hyp[0])**2)/1e5
             print(self.hyp)
             hyp, ML, i = CG.minimize(self,model,maxnumlinesearch=maxnumlinesearch, maxnumfuneval=None, red=1.0, verbose=verbose) 
 

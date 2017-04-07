@@ -3,10 +3,60 @@ import scipy.sparse as ss
 import Kernels 
 import math
 import Kron_utils as KU
+import GP
+import time
 
 from numpy import dot, isinf, isnan, any, sqrt, isreal, real, nan, inf
 
-
+def Linear_CG2(pre,W,K,y,noise,rank_fix,tolerance=1e-3,maxiter=2000):
+    
+    ''' Conjugate Gradient method to solve for alpha:
+    alpha = inverse(WkW')*y
+    
+    Inputs:
+        W --> Nxm weight matrix in sparse matrix format
+        K --> Packed Kronecker set of dimensional gram matrices of the inducing points
+        y --> Nx1 Target values
+        noise --> scalar that represents the noise
+        tolerance --> Stopping criteria of residual
+        maxiter --> Maximum number of iterations
+          
+    Outputs:
+        alpha --> Nx1 solution to linear equation
+        ind  --> indicator of successful convergence. 0 if converged, else maxiter.
+    '''    
+   
+    # initialize alpha
+    alpha = np.zeros((len(y),1))
+    # Perform first iteration 
+    r_last = y
+    p = r_last
+    norm_r_last = np.linalg.norm(r_last)**2
+    
+    mvm = KU.kron_MVM2(pre,W,K,p,noise,rank_fix)
+    a = norm_r_last/np.dot(p.T,mvm)
+    alpha = alpha + a*p
+    r = r_last-a*mvm
+    norm_r = np.linalg.norm(r)**2 
+    iter = 1
+    
+    while (iter <maxiter and norm_r**0.5>tolerance):
+        
+        r_last=r
+        B = norm_r/norm_r_last
+        p = r_last+B*p
+        norm_r_last = norm_r
+        
+        mvm = KU.kron_MVM2(pre,W,K,p,noise,rank_fix)
+        a = norm_r_last/np.dot(p.T,mvm)
+        alpha = alpha + a*p
+        r = r_last-a*mvm  
+        norm_r = np.linalg.norm(r)**2 
+        iter+=1
+    
+    #get indicator flag
+    ind = 0 if iter != maxiter else iter     
+    return (alpha,ind)
 
 def Linear_CG(W,K,y,noise,rank_fix,tolerance=1e-3,maxiter=5000):
     
@@ -58,14 +108,29 @@ def Linear_CG(W,K,y,noise,rank_fix,tolerance=1e-3,maxiter=5000):
     ind = 0 if iter != maxiter else iter     
     return (alpha,ind)
 
+
+def solve(W,K,y,noise,rank_fix):
+    D = len(K)    
+    z = ss.linalg.lsqr(W,y)
+    Kinv = []
+    for d in xrange(D):
+        Kinv.append(np.linalg.inv(K[d]))
+    w = KU.MV_kronprod(Kinv,z)
+    
+    alpha = ss.linalg.lsqr(W.transpose(),w)
+    return alpha
+    
+
+
+
 def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verbose=False):
 
     X=kernel.hyp
     INT = 0.1;# don't reevaluate within 0.1 of the limit of the current bracket
-    EXT = 3.0;              # extrapolate maximum 3 times the current step-size
-    MAX = 20;                     # max 20 function evaluations per line search
+    EXT = 5.0;              # extrapolate maximum 3 times the current step-size
+    MAX = 15;                     # max 20 function evaluations per line search
     RATIO = 10;                                   # maximum allowed slope ratio
-    SIG = 0.1;RHO = SIG/2;# SIG and RHO are the constants controlling the Wolfe-
+    SIG = 0.7;RHO = SIG/2;# SIG and RHO are the constants controlling the Wolfe-
     #Powell conditions. SIG is the maximum allowed absolute ratio between
     #previous and new slopes (derivatives in the search direction), thus setting
     #SIG to low (positive) values forces higher precision in the line-searches.
@@ -94,7 +159,6 @@ def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verb
     df0,f0,rnk  = kernel.Grad(model,X) 
     if rnk!=0:
         kernel.rank_fix = rnk
-    print(df0,f0)
     fX = [f0]
     i = i + (length<0)                                         # count epochs?!
     s = -df0; d0 = -dot(s.T,s)[0,0]    # initial search direction (steepest) and slope
@@ -176,7 +240,7 @@ def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verb
             if f3 < F0:
                 X0 = X+x3*s; F0 = f3; dF0 = df3              # keep best values
             M = M - 1; i = i + (length<0)                      # count epochs?!
-            d3 = dot(df3.T,s)[0,0]                                         # new slope
+            d3 = dot(df3.T,s)[0,0]                                  # new slope
 
         if abs(d3) < -SIG*d0 and f3 < f0+x3*RHO*d0:  # if line search succeeded
             X = X+x3*s; f0 = f3; fX.append(f0)               # update variables
@@ -193,20 +257,99 @@ def minimize(kernel,model,maxnumlinesearch=20, maxnumfuneval=None, red=1.0, verb
             X = X0; f0 = F0; df0 = dF0              # restore best point so far
             if ls_failed or (i>abs(length)):# line search failed twice in a row
                 break                    # or we ran out of time, so we give up
-            s = -df0; d0 = -dot(s.T,s)[0,0]                             # try steepest
+            s = -df0; d0 = -dot(s.T,s)[0,0]                      # try steepest
             x3 = 1/(1-d0)                     
             ls_failed = 1                             # this line search failed
     if verbose: print (" \n")
     return X, fX, i   
 
 if __name__ == '__main__':       
-    data = np.load('Regression_data.npz')
-    x = data['x']
-    y = data['y']
-    params = np.array([[3],[3],[3]])
-    params, ML, i = minimize(params,x,y,maxnumlinesearch=100)
+        
+    N = 100
+    m = 10
+    '''
+    x1 = np.sort(np.random.normal(scale=10,size=(1,N))).reshape(N,1)
+    x2 = np.sort(np.random.normal(scale=10,size=(1,N))).reshape(N,1)
+    '''
+    x1 = np.sort(25*np.random.rand(1,N)-25*np.random.rand(1,N)).reshape(N,1)
+    x2 =  np.sort(25*np.random.rand(1,N)-25*np.random.rand(1,N)).reshape(N,1)
+    x1s = np.linspace(-28,28,num=300).reshape(300,1)
+    x2s = np.linspace(-28,28,num=300).reshape(300,1)
+    x = np.hstack((x1,x2))
+    xs=np.hstack((x1s,x2s))
+    y= x1**2 - 10*x1*(np.sin(x2))**3 + np.random.normal(scale=10,size=(N,1))
     
     
+    Model1 = GP.GPRegression(x,y,noise=True)
+    Model1.GenerateGrid([m,m])
+    Model1.Interpolate(scheme='cubic')
+    Model1.SetKernel('Gaussian')
+    start = time.time()
+    #Model1.OptimizeHyp(maxnumlinesearch=40,random_starts=1)
+    end = time.time()
+    Model1.KISSGP()
+    Model1.Predict(xs)
     
-                             
+    print('Kiss-GP done in %.8f seconds' %(end-start))    
+    
+    K = Model1.Kuu
+    W = Model1.W
+    D = 2
+    
+    E = []
+    Q = []
+    QT = []
+    Kinv = []
+    for d in xrange(D):
+        Kinv.append(np.linalg.inv(K[d]+1e-6*np.eye(m)))
+        e,q = np.linalg.eigh(K[d]+1e-6*np.eye(m))
+        E.append(e)
+        Q.append(q)
+        QT.append(q.T)
+    '''
+    
+    count = 0
+    ind = np.sort(W.indices)
+    notempty = []
+    for i in ind:
+        if i==count:
+            notempty.append(count)
+            count+=1
+            continue
+        if i==count-1:
+            continue
+        if i > count:
+            count = i
+    Wnew = ss.lil_matrix(W[:,notempty])         
+    
+    z = ss.linalg.lsqr(Wnew,y,show=True,atol=1e-6)
+    x= np.zeros((m**2,1))
+    for i in xrange(len(notempty)):
+        x[notempty[i]] = z[0][i]
+    
+    w = KU.MV_kronprod(Kinv,x)
+    
+    WTnew = ss.lil_matrix(W.transpose()[notempty,:])
+    
+    alpha = ss.linalg.lsqr(WTnew,w,show=True)
+    
+    a = np.zeros((m**2,1))
+    for i in xrange(len(notempty)):
+        a[notempty[i]] = z[0][i]
+    '''
+    
+    x = ss.linalg.lsqr(W,y,show=True)
+    
+    w = KU.MV_kronprod(QT,x[0])
+    E = np.kron(E[0],E[1])
+    E = E+1e-6*np.ones((1,m**2))
+    
+    invE = np.diag(E.ravel()**-1)
+    w = np.dot(invE,w)    
+    w = KU.MV_kronprod(Q,w)
+    #w = KU.MV_kronprod(Kinv,x[0])
+    
+    alpha = ss.linalg.lsqr(W.transpose(),w,show=True)
+    
+    alpha1 = Linear_CG(W,K,y,1e-3,0,tolerance=1e-3,maxiter=10000)                         
     
